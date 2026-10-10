@@ -60,7 +60,8 @@ resources:
       securityGroups:
         - ${albSecurityGroup.id}
       subnets:
-        - ${networkStack.outputs["publicSubnetId"]}
+        - ${networkStack.outputs["publicSubnetAId"]}
+        - ${networkStack.outputs["publicSubnetBId"]}
       dropInvalidHeaderFields: true
       enableDeletionProtection: false
       tags:

@@ -1,5 +1,5 @@
 name: pattern-incident-quarantine-automation
-description: Automated incident response and instance quarantine triggered by EventBridge security findings
+description: Automated incident response and instance quarantine triggered by EventBridge security findings with DLQ resilience
 runtime: yaml
 
 resources:
@@ -43,6 +43,7 @@ resources:
           "Version": "2012-10-17",
           "Statement": [
             {
+              "Sid": "AllowForensicSnapshotAndEniIsolation",
               "Effect": "Allow",
               "Action": [
                 "ec2:DescribeInstances",
@@ -53,6 +54,7 @@ resources:
               "Resource": "*"
             },
             {
+              "Sid": "AllowCloudWatchLogging",
               "Effect": "Allow",
               "Action": [
                 "logs:CreateLogGroup",
@@ -100,12 +102,24 @@ resources:
           }
         }
 
-  # 5. Target Binding & Invocation Permission
+  # 5. SQS Dead-Letter Queue (DLQ) for Failed Quarantine Attempts
+  incidentDlq:
+    type: aws:sqs:Queue
+    properties:
+      name: incident-quarantine-failures-dlq
+      messageRetentionSeconds: 1209600 # 14 days
+
+  # 6. Target Binding with DLQ and Retry Policy
   findingTarget:
     type: aws:cloudwatch:EventTarget
     properties:
       rule: ${findingRule.name}
       arn: ${quarantineLambda.arn}
+      deadLetterConfig:
+        arn: ${incidentDlq.arn}
+      retryPolicy:
+        maximumRetryAttempts: 5
+        maximumEventAgeInSeconds: 3600
 
   lambdaPermission:
     type: aws:lambda:Permission
@@ -118,3 +132,4 @@ resources:
 outputs:
   isolationSecurityGroupId: ${isolationSecurityGroup.id}
   lambdaArn: ${quarantineLambda.arn}
+  incidentDlqArn: ${incidentDlq.arn}

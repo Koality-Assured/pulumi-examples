@@ -125,7 +125,7 @@ resources:
         forwardedValues:
           queryString: true
           cookies:
-            forward: all
+            forward: none # Security & caching best practice: do not forward all cookies to static edge caches
         minTtl: 0
         defaultTtl: 3600
         maxTtl: 86400
@@ -137,6 +137,8 @@ resources:
           responsePagePath: /index.html
           errorCachingMinTtl: 10
 
+      # Default certificate for *.cloudfront.net edge serving.
+      # For custom domains (aliases), specify acmCertificateArn (us-east-1) and sslSupportMethod: sni-only.
       viewerCertificate:
         cloudfrontDefaultCertificate: true
 

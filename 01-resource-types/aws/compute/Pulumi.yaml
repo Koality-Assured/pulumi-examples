@@ -82,7 +82,7 @@ resources:
       ami: ${ubuntuAmi.id}
       instanceType: ${instanceType}
       keyName: ${keyPairName}
-      subnetId: ${networkStack.outputs["privateSubnetId"]}
+      subnetId: ${networkStack.outputs["privateSubnetAId"]}
       vpcSecurityGroupIds:
         - ${networkStack.outputs["appSecurityGroupId"]}
       iamInstanceProfile: ${instanceProfile.name}

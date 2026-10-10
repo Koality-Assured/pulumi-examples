@@ -1,12 +1,15 @@
 name: aws-networking-foundation
-description: Production-grade AWS networking foundation (VPC, public/private subnets, NAT/IGW, route tables, and security groups)
+description: Production-grade AWS networking foundation (VPC, multi-AZ public/private subnets, NAT/IGW, route tables, and security groups)
 runtime: yaml
 
 variables:
   vpcCidr: 10.100.0.0/16
-  publicSubnetCidr: 10.100.1.0/24
-  privateSubnetCidr: 10.100.10.0/24
+  publicSubnetACidr: 10.100.1.0/24
+  publicSubnetBCidr: 10.100.2.0/24
+  privateSubnetACidr: 10.100.10.0/24
+  privateSubnetBCidr: 10.100.20.0/24
   primaryAz: us-west-2a
+  secondaryAz: us-west-2b
 
 resources:
   # 1. Virtual Private Cloud (VPC)
@@ -32,16 +35,28 @@ resources:
         Name: igw-primary-prod
         Environment: Production
 
-  # 3. Public Subnet
-  publicSubnet:
+  # 3. Multi-AZ Public Subnets (Required for Application Load Balancers)
+  publicSubnetA:
     type: aws:ec2:Subnet
     properties:
       vpcId: ${primaryVpc.id}
-      cidrBlock: ${publicSubnetCidr}
+      cidrBlock: ${publicSubnetACidr}
       availabilityZone: ${primaryAz}
       mapPublicIpOnLaunch: false # Defense-in-depth: do not auto-assign public IPs by default
       tags:
         Name: snet-public-usw2a
+        Tier: Public
+        Environment: Production
+
+  publicSubnetB:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${primaryVpc.id}
+      cidrBlock: ${publicSubnetBCidr}
+      availabilityZone: ${secondaryAz}
+      mapPublicIpOnLaunch: false
+      tags:
+        Name: snet-public-usw2b
         Tier: Public
         Environment: Production
 
@@ -57,10 +72,16 @@ resources:
         Name: rtb-public-prod
         Tier: Public
 
-  publicRouteTableAssoc:
+  publicRouteTableAssocA:
     type: aws:ec2:RouteTableAssociation
     properties:
-      subnetId: ${publicSubnet.id}
+      subnetId: ${publicSubnetA.id}
+      routeTableId: ${publicRouteTable.id}
+
+  publicRouteTableAssocB:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${publicSubnetB.id}
       routeTableId: ${publicRouteTable.id}
 
   # 5. Elastic IP for NAT Gateway
@@ -77,7 +98,7 @@ resources:
     type: aws:ec2:NatGateway
     properties:
       allocationId: ${natEip.id}
-      subnetId: ${publicSubnet.id}
+      subnetId: ${publicSubnetA.id}
       connectivityType: public
       tags:
         Name: nat-gw-usw2a
@@ -86,16 +107,28 @@ resources:
       dependsOn:
         - ${internetGateway}
 
-  # 7. Private Subnet
-  privateSubnet:
+  # 7. Multi-AZ Private Subnets
+  privateSubnetA:
     type: aws:ec2:Subnet
     properties:
       vpcId: ${primaryVpc.id}
-      cidrBlock: ${privateSubnetCidr}
+      cidrBlock: ${privateSubnetACidr}
       availabilityZone: ${primaryAz}
       mapPublicIpOnLaunch: false
       tags:
         Name: snet-private-usw2a
+        Tier: Private
+        Environment: Production
+
+  privateSubnetB:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${primaryVpc.id}
+      cidrBlock: ${privateSubnetBCidr}
+      availabilityZone: ${secondaryAz}
+      mapPublicIpOnLaunch: false
+      tags:
+        Name: snet-private-usw2b
         Tier: Private
         Environment: Production
 
@@ -111,10 +144,16 @@ resources:
         Name: rtb-private-prod
         Tier: Private
 
-  privateRouteTableAssoc:
+  privateRouteTableAssocA:
     type: aws:ec2:RouteTableAssociation
     properties:
-      subnetId: ${privateSubnet.id}
+      subnetId: ${privateSubnetA.id}
+      routeTableId: ${privateRouteTable.id}
+
+  privateRouteTableAssocB:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${privateSubnetB.id}
       routeTableId: ${privateRouteTable.id}
 
   # 9. Baseline Application Security Group
@@ -145,7 +184,15 @@ resources:
 outputs:
   vpcId: ${primaryVpc.id}
   vpcCidrBlock: ${primaryVpc.cidrBlock}
-  publicSubnetId: ${publicSubnet.id}
-  privateSubnetId: ${privateSubnet.id}
+  publicSubnetAId: ${publicSubnetA.id}
+  publicSubnetBId: ${publicSubnetB.id}
+  privateSubnetAId: ${privateSubnetA.id}
+  privateSubnetBId: ${privateSubnetB.id}
+  publicSubnetIds:
+    - ${publicSubnetA.id}
+    - ${publicSubnetB.id}
+  privateSubnetIds:
+    - ${privateSubnetA.id}
+    - ${privateSubnetB.id}
   natGatewayId: ${natGateway.id}
   appSecurityGroupId: ${appSecurityGroup.id}

@@ -8,23 +8,26 @@ new AwsGuard({ all: "advisory" });
 // 2. Custom Policy Pack definitions
 new PolicyPack("enterprise-security-guardrails", {
   policies: [
-    // Policy 1: Require Standard Tags on all Tagged AWS Resources
+    // Policy 1: Require Standard Tags on all Taggable AWS Resources
     {
       name: "require-standard-tags",
       description: "Ensures all taggable AWS resources define Environment and Service tags.",
       enforcementLevel: "mandatory",
       validateResource: (args, reportViolation) => {
-        const requiredTags = ["Environment", "Service"];
-        const tags = args.props.tags;
-        if (!tags) {
-          reportViolation(`Resource of type ${args.type} must define tags.`);
-          return;
-        }
-        for (const tag of requiredTags) {
-          if (!tags[tag] || tags[tag].trim() === "") {
-            reportViolation(
-              `Resource of type ${args.type} is missing required tag '${tag}'.`
-            );
+        // Guard: Only validate resources that support a tags schema property
+        if (args.props && "tags" in args.props) {
+          const requiredTags = ["Environment", "Service"];
+          const tags = args.props.tags;
+          if (!tags || typeof tags !== "object") {
+            reportViolation(`Taggable resource of type ${args.type} must define a valid tags object.`);
+            return;
+          }
+          for (const tag of requiredTags) {
+            if (!tags[tag] || typeof tags[tag] !== "string" || tags[tag].trim() === "") {
+              reportViolation(
+                `Resource of type ${args.type} is missing required tag '${tag}'.`
+              );
+            }
           }
         }
       },
@@ -45,17 +48,27 @@ new PolicyPack("enterprise-security-guardrails", {
       }),
     },
 
-    // Policy 3: Prohibit Unencrypted S3 Buckets
+    // Policy 3: Enforce Server-Side Encryption on S3 Configuration Resources
     {
       name: "require-s3-encryption",
-      description: "S3 buckets must not have server-side encryption disabled.",
+      description: "S3 bucket encryption configuration must specify a valid server-side encryption algorithm.",
       enforcementLevel: "mandatory",
-      validateResource: validateResourceOfType(aws.s3.BucketV2, (bucket, args, reportViolation) => {
-        // Validation logic for S3 server-side encryption configuration
-        if (args.props.serverSideEncryptionConfiguration === null) {
-          reportViolation("S3 bucket must configure server-side encryption with KMS or AES256.");
+      validateResource: validateResourceOfType(
+        aws.s3.BucketServerSideEncryptionConfigurationV2,
+        (sseConfig, args, reportViolation) => {
+          const rules = sseConfig.rules;
+          if (!rules || rules.length === 0) {
+            reportViolation("S3 bucket encryption configuration must declare at least one encryption rule.");
+            return;
+          }
+          const defaultEncryption = rules[0].applyServerSideEncryptionByDefault;
+          if (!defaultEncryption || !defaultEncryption.sseAlgorithm) {
+            reportViolation(
+              "S3 bucket encryption rule must define applyServerSideEncryptionByDefault with sseAlgorithm ('aws:kms' or 'AES256')."
+            );
+          }
         }
-      }),
+      ),
     },
   ],
 });

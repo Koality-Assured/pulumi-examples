@@ -20,7 +20,7 @@ resources:
         Environment: Production
         ManagedBy: Pulumi
 
-  # 2. IAM Role for GitHub Actions Workflows (Scoped to Organization Repositories)
+  # 2. IAM Role for GitHub Actions Workflows (Scoped to Protected Main Branches)
   githubDeployerRole:
     type: aws:iam:Role
     properties:
@@ -42,7 +42,7 @@ resources:
                   "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
                 },
                 "StringLike": {
-                  "token.actions.githubusercontent.com:sub": "repo:${githubOrg}/*:*"
+                  "token.actions.githubusercontent.com:sub": "repo:${githubOrg}/*:ref:refs/heads/main"
                 }
               }
             }
@@ -79,11 +79,19 @@ resources:
               "Effect": "Allow",
               "Action": [
                 "ec2:Describe*",
-                "s3:GetBucket*",
+                "s3:GetBucketLocation",
+                "s3:GetBucketAcl"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "AllowScopedIamRoleInspection",
+              "Effect": "Allow",
+              "Action": [
                 "iam:GetRole",
                 "iam:GetRolePolicy"
               ],
-              "Resource": "*"
+              "Resource": "arn:aws:iam::*:role/role-*"
             }
           ]
         }
