@@ -1,0 +1,99 @@
+name: aws-identity-oidc
+description: Keyless GitHub Actions CI/CD authentication using AWS IAM OIDC Identity Providers and least-privilege roles
+runtime: yaml
+
+variables:
+  githubOrg: koality-assured
+  githubThumbprint: 6938fd4d98bab03faadb97b34396831e3780aea1 # Standard GitHub Actions OIDC root thumbprint
+
+resources:
+  # 1. GitHub Actions OpenID Connect (OIDC) Provider
+  githubOidcProvider:
+    type: aws:iam:OpenIdConnectProvider
+    properties:
+      url: https://token.actions.githubusercontent.com
+      clientIdLists:
+        - sts.amazonaws.com
+      thumbprintLists:
+        - ${githubThumbprint}
+      tags:
+        Environment: Production
+        ManagedBy: Pulumi
+
+  # 2. IAM Role for GitHub Actions Workflows (Scoped to Organization Repositories)
+  githubDeployerRole:
+    type: aws:iam:Role
+    properties:
+      name: role-github-actions-deployer
+      description: Scoped execution role for GitHub Actions workflows via OIDC
+      maxSessionDuration: 3600
+      assumeRolePolicy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "${githubOidcProvider.arn}"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+                },
+                "StringLike": {
+                  "token.actions.githubusercontent.com:sub": "repo:${githubOrg}/*:*"
+                }
+              }
+            }
+          ]
+        }
+      tags:
+        Environment: Production
+
+  # 3. Scoped Least-Privilege Policy for Deployer
+  deployerPolicy:
+    type: aws:iam:Policy
+    properties:
+      name: policy-github-actions-deployer
+      description: Granular deployment permissions for cloud infrastructure
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowStateStorageAccess",
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket"
+              ],
+              "Resource": [
+                "arn:aws:s3:::*-pulumi-state",
+                "arn:aws:s3:::*-pulumi-state/*"
+              ]
+            },
+            {
+              "Sid": "AllowInfrastructureInspection",
+              "Effect": "Allow",
+              "Action": [
+                "ec2:Describe*",
+                "s3:GetBucket*",
+                "iam:GetRole",
+                "iam:GetRolePolicy"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+
+  deployerPolicyAttachment:
+    type: aws:iam:RolePolicyAttachment
+    properties:
+      role: ${githubDeployerRole.name}
+      policyArn: ${deployerPolicy.arn}
+
+outputs:
+  oidcProviderArn: ${githubOidcProvider.arn}
+  deployerRoleArn: ${githubDeployerRole.arn}

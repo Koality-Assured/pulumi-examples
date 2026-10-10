@@ -1,0 +1,82 @@
+name: saas-github-organization
+description: GitHub Organization-as-Code with teams, secure repository templates, branch protection rules, and RBAC grants
+runtime: yaml
+
+variables:
+  orgName: koality-assured
+
+resources:
+  # 1. Engineering Teams
+  platformCoreTeam:
+    type: github:Team
+    properties:
+      name: Platform Engineering
+      description: Core platform and infrastructure engineering team
+      privacy: closed
+
+  securityOperationsTeam:
+    type: github:Team
+    properties:
+      name: Security Operations
+      description: SecOps and incident response team
+      privacy: closed
+
+  # 2. Hardened Infrastructure Repository Template
+  iacTemplateRepo:
+    type: github:Repository
+    properties:
+      name: iac-template-repository
+      description: Golden path template repository for Infrastructure as Code with Pulumi
+      visibility: public
+      isTemplate: true
+      hasIssues: true
+      hasDiscussions: true
+      autoInit: true
+      vulnerabilityAlerts: true
+      securityAndAnalysis:
+        secretScanning:
+          status: enabled
+        secretScanningPushProtection:
+          status: enabled
+
+  # 3. RBAC Permissions Grant: Platform Engineering Admin Access
+  platformTeamRepoAccess:
+    type: github:TeamRepository
+    properties:
+      teamId: ${platformCoreTeam.id}
+      repository: ${iacTemplateRepo.name}
+      permission: admin
+
+  # 4. RBAC Permissions Grant: SecOps Triage Access
+  securityTeamRepoAccess:
+    type: github:TeamRepository
+    properties:
+      teamId: ${securityOperationsTeam.id}
+      repository: ${iacTemplateRepo.name}
+      permission: maintain
+
+  # 5. Strict Branch Protection Rule on 'main'
+  mainBranchProtection:
+    type: github:BranchProtection
+    properties:
+      repositoryId: ${iacTemplateRepo.nodeId}
+      pattern: main
+      enforceAdmins: true
+      allowsDeletions: false
+      allowsForcePushes: false
+      requireSignedCommits: true
+      requiredStatusChecks:
+        - strict: true
+          contexts:
+            - adversarial-audit
+            - security-scan
+      requiredPullRequestReviews:
+        - dismissStaleReviews: true
+          requireCodeOwnerReviews: true
+          requiredApprovingReviewCount: 1
+          requireLastPushApproval: true
+
+outputs:
+  templateRepoHtmlUrl: ${iacTemplateRepo.htmlUrl}
+  platformTeamSlug: ${platformCoreTeam.slug}
+  securityTeamSlug: ${securityOperationsTeam.slug}

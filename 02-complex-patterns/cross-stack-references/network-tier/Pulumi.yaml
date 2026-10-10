@@ -1,0 +1,53 @@
+name: pattern-cross-stack-network
+description: Network tier micro-stack exposing outputs for consumption by independent application stacks
+runtime: yaml
+
+variables:
+  vpcCidr: 10.200.0.0/16
+  publicSubnetCidr: 10.200.1.0/24
+  privateSubnetCidr: 10.200.10.0/24
+
+resources:
+  vpc:
+    type: aws:ec2:Vpc
+    properties:
+      cidrBlock: ${vpcCidr}
+      enableDnsHostnames: true
+      enableDnsSupport: true
+      tags:
+        Name: vpc-cross-stack-demo
+        Tier: Networking
+        Environment: Production
+
+  igw:
+    type: aws:ec2:InternetGateway
+    properties:
+      vpcId: ${vpc.id}
+      tags:
+        Name: igw-cross-stack-demo
+
+  publicSubnet:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${vpc.id}
+      cidrBlock: ${publicSubnetCidr}
+      availabilityZone: us-west-2a
+      tags:
+        Name: snet-public-demo
+        Tier: Public
+
+  privateSubnet:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${vpc.id}
+      cidrBlock: ${privateSubnetCidr}
+      availabilityZone: us-west-2a
+      tags:
+        Name: snet-private-demo
+        Tier: Private
+
+outputs:
+  vpcId: ${vpc.id}
+  vpcCidr: ${vpc.cidrBlock}
+  publicSubnetId: ${publicSubnet.id}
+  privateSubnetId: ${privateSubnet.id}

@@ -1,0 +1,22 @@
+name: gcp-compute-ssl-policy
+description: Production Google Cloud regional SSL policy enforcing TLS 1.2+ and restricted cipher suites
+runtime: yaml
+
+variables:
+  region: us-west1
+  policyName: ssl-policy-hardened-usw1
+
+resources:
+  # Regional SSL Policy for Google Cloud HTTPS Load Balancers
+  hardenedSslPolicy:
+    type: gcp:compute:RegionSslPolicy
+    properties:
+      name: ${policyName}
+      region: ${region}
+      profile: RESTRICTED
+      minTlsVersion: TLS_1_2
+      description: Regional SSL Policy enforcing modern restricted TLS 1.2 and TLS 1.3 ciphers
+
+outputs:
+  sslPolicyId: ${hardenedSslPolicy.id}
+  sslPolicySelfLink: ${hardenedSslPolicy.selfLink}

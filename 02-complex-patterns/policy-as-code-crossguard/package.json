@@ -1,0 +1,16 @@
+{
+  "name": "enterprise-security-guardrails",
+  "version": "1.0.0",
+  "description": "CrossGuard Policy Pack for cloud security compliance",
+  "main": "index.ts",
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.0.0",
+    "@pulumi/awsguard": "^2.0.0",
+    "@pulumi/policy": "^1.8.0",
+    "@pulumi/pulumi": "^3.0.0"
+  }
+}

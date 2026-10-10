@@ -1,0 +1,79 @@
+name: pattern-multi-region-routing
+description: Active-passive multi-region DNS failover routing with Amazon Route53 and automated health checks
+runtime: yaml
+
+variables:
+  domainName: app.example.com
+  primaryRegionEndpoint: 198.51.100.10 # Primary region (us-east-1) ALB IP / endpoint
+  secondaryRegionEndpoint: 198.51.100.20 # Secondary region (us-west-2) ALB IP / endpoint
+
+resources:
+  # 1. Route53 Public Hosted Zone
+  publicZone:
+    type: aws:route53:Zone
+    properties:
+      name: example.com
+      comment: Public hosted zone for multi-region failover demonstration
+
+  # 2. Health Check for Primary Region (us-east-1)
+  primaryHealthCheck:
+    type: aws:route53:HealthCheck
+    properties:
+      ipAddress: ${primaryRegionEndpoint}
+      port: 443
+      type: HTTPS
+      resourcePath: /healthz
+      failureThreshold: 3
+      requestInterval: 30
+      tags:
+        Name: hc-primary-use1
+        Region: us-east-1
+
+  # 3. Health Check for Secondary Region (us-west-2)
+  secondaryHealthCheck:
+    type: aws:route53:HealthCheck
+    properties:
+      ipAddress: ${secondaryRegionEndpoint}
+      port: 443
+      type: HTTPS
+      resourcePath: /healthz
+      failureThreshold: 3
+      requestInterval: 30
+      tags:
+        Name: hc-secondary-usw2
+        Region: us-west-2
+
+  # 4. Route53 Record: Primary Region Endpoint (Failover: PRIMARY)
+  primaryDnsRecord:
+    type: aws:route53:Record
+    properties:
+      zoneId: ${publicZone.zoneId}
+      name: ${domainName}
+      type: A
+      ttl: 60
+      records:
+        - ${primaryRegionEndpoint}
+      setIdentifier: primary-use1
+      healthCheckId: ${primaryHealthCheck.id}
+      failoverRoutingPolicies:
+        - type: PRIMARY
+
+  # 5. Route53 Record: Secondary Region Endpoint (Failover: SECONDARY)
+  secondaryDnsRecord:
+    type: aws:route53:Record
+    properties:
+      zoneId: ${publicZone.zoneId}
+      name: ${domainName}
+      type: A
+      ttl: 60
+      records:
+        - ${secondaryRegionEndpoint}
+      setIdentifier: secondary-usw2
+      healthCheckId: ${secondaryHealthCheck.id}
+      failoverRoutingPolicies:
+        - type: SECONDARY
+
+outputs:
+  zoneId: ${publicZone.zoneId}
+  domainFqdn: ${primaryDnsRecord.fqdn}
+  primaryHealthCheckId: ${primaryHealthCheck.id}

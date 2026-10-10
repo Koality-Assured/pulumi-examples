@@ -1,0 +1,122 @@
+name: aws-storage-hardened-s3
+description: Enterprise-hardened S3 storage with KMS CMK encryption, public access block, TLS 1.2+ bucket policy, and lifecycle rules
+runtime: yaml
+
+variables:
+  bucketPrefix: platform-secure-storage-prod
+
+resources:
+  # 1. Customer Managed Key (CMK) for Object Encryption
+  storageKmsKey:
+    type: aws:kms:Key
+    properties:
+      description: KMS Key for encrypting production S3 storage objects
+      enableKeyRotation: true
+      keyUsage: ENCRYPT_DECRYPT
+      tags:
+        Environment: Production
+        ManagedBy: Pulumi
+
+  # 2. Hardened S3 Bucket
+  secureBucket:
+    type: aws:s3:BucketV2
+    properties:
+      bucketPrefix: ${bucketPrefix}-
+      forceDestroy: false
+      tags:
+        Name: ${bucketPrefix}
+        Environment: Production
+        DataClassification: Confidential
+
+  # 3. S3 Bucket Versioning
+  bucketVersioning:
+    type: aws:s3:BucketVersioningV2
+    properties:
+      bucket: ${secureBucket.id}
+      versioningConfiguration:
+        status: Enabled
+
+  # 4. Server-Side Encryption with KMS CMK
+  bucketEncryption:
+    type: aws:s3:BucketServerSideEncryptionConfigurationV2
+    properties:
+      bucket: ${secureBucket.id}
+      rules:
+        - applyServerSideEncryptionByDefault:
+            sseAlgorithm: aws:kms
+            kmsMasterKeyId: ${storageKmsKey.arn}
+          bucketKeyEnabled: true
+
+  # 5. S3 Block Public Access (All 4 settings enabled)
+  publicAccessBlock:
+    type: aws:s3:BucketPublicAccessBlock
+    properties:
+      bucket: ${secureBucket.id}
+      blockPublicAcls: true
+      blockPublicPolicy: true
+      ignorePublicAcls: true
+      restrictPublicBuckets: true
+
+  # 6. S3 Bucket Policy Enforcing TLS 1.2+ Transport
+  enforceTlsPolicy:
+    type: aws:s3:BucketPolicy
+    properties:
+      bucket: ${secureBucket.id}
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "EnforceTlsOnly",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                "${secureBucket.arn}",
+                "${secureBucket.arn}/*"
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            },
+            {
+              "Sid": "EnforceTlsVersion",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                "${secureBucket.arn}",
+                "${secureBucket.arn}/*"
+              ],
+              "Condition": {
+                "NumericLessThan": {
+                  "s3:TlsVersion": 1.2
+                }
+              }
+            }
+          ]
+        }
+    options:
+      dependsOn:
+        - ${publicAccessBlock}
+
+  # 7. S3 Lifecycle Configuration
+  lifecyclePolicy:
+    type: aws:s3:BucketLifecycleConfigurationV2
+    properties:
+      bucket: ${secureBucket.id}
+      rules:
+        - id: transition-and-expire-noncurrent
+          status: Enabled
+          noncurrentVersionTransitions:
+            - noncurrentDays: 90
+              storageClass: GLACIER
+          noncurrentVersionExpiration:
+            noncurrentDays: 365
+
+outputs:
+  bucketName: ${secureBucket.id}
+  bucketArn: ${secureBucket.arn}
+  kmsKeyArn: ${storageKmsKey.arn}

@@ -1,0 +1,150 @@
+name: aws-edge-cloudfront-waf
+description: Global edge routing with CloudFront CDN, origin failover groups, custom error responses, and AWS WAFv2 inspection
+runtime: yaml
+
+variables:
+  primaryOriginDomain: origin-primary.example.com
+  failoverOriginDomain: origin-secondary.example.com
+  primaryOriginId: primaryOrigin
+  failoverOriginId: failoverOrigin
+  originGroupId: edgeOriginFailoverGroup
+
+resources:
+  # 1. AWS WAFv2 WebACL for CloudFront Edge Protection (Must be in us-east-1)
+  edgeWebAcl:
+    type: aws:wafv2:WebAcl
+    properties:
+      name: waf-edge-global-prod
+      scope: CLOUDFRONT
+      description: Production edge WAF ruleset with AWS Managed Rules and Rate Limiting
+      defaultAction:
+        allow: {}
+      visibilityConfig:
+        cloudwatchMetricsEnabled: true
+        metricName: waf-edge-global-prod-metric
+        sampledRequestsEnabled: true
+      rules:
+        # Managed Rule: Common Rule Set
+        - name: AWSManagedRulesCommonRuleSet
+          priority: 10
+          overrideAction:
+            none: {}
+          statement:
+            managedRuleGroupStatement:
+              vendorName: AWS
+              name: AWSManagedRulesCommonRuleSet
+          visibilityConfig:
+            cloudwatchMetricsEnabled: true
+            metricName: waf-managed-common-metric
+            sampledRequestsEnabled: true
+
+        # Managed Rule: Known Bad Inputs
+        - name: AWSManagedRulesKnownBadInputsRuleSet
+          priority: 20
+          overrideAction:
+            none: {}
+          statement:
+            managedRuleGroupStatement:
+              vendorName: AWS
+              name: AWSManagedRulesKnownBadInputsRuleSet
+          visibilityConfig:
+            cloudwatchMetricsEnabled: true
+            metricName: waf-managed-bad-inputs-metric
+            sampledRequestsEnabled: true
+
+        # Custom Rate-Based Rule: Defend against Layer 7 DDoS
+        - name: RateLimitByIp
+          priority: 30
+          action:
+            block: {}
+          statement:
+            rateBasedStatement:
+              limit: 2000 # Requests per 5-minute evaluation window
+              aggregateKeyType: IP
+          visibilityConfig:
+            cloudwatchMetricsEnabled: true
+            metricName: waf-rate-limit-metric
+            sampledRequestsEnabled: true
+
+  # 2. CloudFront Edge Distribution with Origin Failover Group
+  cdnDistribution:
+    type: aws:cloudfront:Distribution
+    properties:
+      enabled: true
+      comment: Global edge CDN with automated origin failover and WAF inspection
+      priceClass: PriceClass_100 # Cost optimization: North America and Europe only
+      webAclId: ${edgeWebAcl.arn}
+
+      # Origins: Primary and Failover Backends
+      origins:
+        - domainName: ${primaryOriginDomain}
+          originId: ${primaryOriginId}
+          customOriginConfig:
+            httpPort: 80
+            httpsPort: 443
+            originProtocolPolicy: https-only
+            originSslProtocols:
+              - TLSv1.2
+
+        - domainName: ${failoverOriginDomain}
+          originId: ${failoverOriginId}
+          customOriginConfig:
+            httpPort: 80
+            httpsPort: 443
+            originProtocolPolicy: https-only
+            originSslProtocols:
+              - TLSv1.2
+
+      # Origin Groups: Configures active-passive origin failover
+      originGroups:
+        - originId: ${originGroupId}
+          failoverCriteria:
+            statusCodes:
+              - 500
+              - 502
+              - 503
+              - 504
+          members:
+            - originId: ${primaryOriginId}
+            - originId: ${failoverOriginId}
+
+      defaultCacheBehavior:
+        targetOriginId: ${originGroupId}
+        viewerProtocolPolicy: redirect-to-https
+        allowedMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+          - PUT
+          - POST
+          - PATCH
+          - DELETE
+        cachedMethods:
+          - GET
+          - HEAD
+        forwardedValues:
+          queryString: true
+          cookies:
+            forward: all
+        minTtl: 0
+        defaultTtl: 3600
+        maxTtl: 86400
+
+      # Custom Error Response: Single Page Application (SPA) routing fallback
+      customErrorResponses:
+        - errorCode: 404
+          responseCode: 200
+          responsePagePath: /index.html
+          errorCachingMinTtl: 10
+
+      viewerCertificate:
+        cloudfrontDefaultCertificate: true
+
+      restrictions:
+        geoRestriction:
+          restrictionType: none
+
+outputs:
+  distributionId: ${cdnDistribution.id}
+  distributionDomainName: ${cdnDistribution.domainName}
+  wafAclArn: ${edgeWebAcl.arn}

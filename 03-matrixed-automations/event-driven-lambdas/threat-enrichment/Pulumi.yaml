@@ -1,0 +1,84 @@
+name: pattern-threat-enrichment-pipeline
+description: Event-driven threat intelligence pipeline using SQS FIFO queues and AWS Lambda
+runtime: yaml
+
+resources:
+  # 1. Dead Letter Queue for Failed Processing Retries
+  enrichmentDlq:
+    type: aws:sqs:Queue
+    properties:
+      name: threat-hashes-dlq.fifo
+      fifoQueue: true
+      messageRetentionSeconds: 1209600 # 14 days
+
+  # 2. Main SQS FIFO Ingestion Queue
+  enrichmentQueue:
+    type: aws:sqs:Queue
+    properties:
+      name: threat-hashes-ingest.fifo
+      fifoQueue: true
+      contentBasedDeduplication: true
+      visibilityTimeoutSeconds: 300
+      redrivePolicy: |
+        {
+          "deadLetterTargetArn": "${enrichmentDlq.arn}",
+          "maxReceiveCount": 3
+        }
+
+  # 3. IAM Execution Role for Lambda
+  lambdaExecutionRole:
+    type: aws:iam:Role
+    properties:
+      name: role-threat-enrichment-lambda
+      assumeRolePolicy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ]
+        }
+      tags:
+        Environment: Production
+
+  lambdaPolicyAttachment:
+    type: aws:iam:RolePolicyAttachment
+    properties:
+      role: ${lambdaExecutionRole.name}
+      policyArn: arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+
+  # 4. Serverless Threat Enrichment Lambda Function
+  enrichmentLambda:
+    type: aws:lambda:Function
+    properties:
+      name: fn-threat-enrichment-worker
+      runtime: python3.11
+      role: ${lambdaExecutionRole.arn}
+      handler: handler.lambda_handler
+      code:
+        fn::fileArchive: ./
+      timeout: 120
+      memorySize: 512
+      environment:
+        variables:
+          ENVIRONMENT: production
+          THREAT_FEED_ENDPOINT: https://api.threatintel.example.com/v1
+
+  # 5. SQS Event Source Mapping
+  sqsMapping:
+    type: aws:lambda:EventSourceMapping
+    properties:
+      eventSourceArn: ${enrichmentQueue.arn}
+      functionName: ${enrichmentLambda.arn}
+      batchSize: 10
+      maximumBatchingWindowInSeconds: 15
+
+outputs:
+  queueUrl: ${enrichmentQueue.url}
+  queueArn: ${enrichmentQueue.arn}
+  lambdaArn: ${enrichmentLambda.arn}

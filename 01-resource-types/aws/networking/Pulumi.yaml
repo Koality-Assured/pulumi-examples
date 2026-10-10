@@ -1,0 +1,151 @@
+name: aws-networking-foundation
+description: Production-grade AWS networking foundation (VPC, public/private subnets, NAT/IGW, route tables, and security groups)
+runtime: yaml
+
+variables:
+  vpcCidr: 10.100.0.0/16
+  publicSubnetCidr: 10.100.1.0/24
+  privateSubnetCidr: 10.100.10.0/24
+  primaryAz: us-west-2a
+
+resources:
+  # 1. Virtual Private Cloud (VPC)
+  primaryVpc:
+    type: aws:ec2:Vpc
+    properties:
+      cidrBlock: ${vpcCidr}
+      enableDnsHostnames: true
+      enableDnsSupport: true
+      instanceTenancy: default
+      tags:
+        Name: vpc-primary-prod
+        Environment: Production
+        ManagedBy: Pulumi
+        Service: CoreNetworking
+
+  # 2. Internet Gateway (IGW) for public egress/ingress
+  internetGateway:
+    type: aws:ec2:InternetGateway
+    properties:
+      vpcId: ${primaryVpc.id}
+      tags:
+        Name: igw-primary-prod
+        Environment: Production
+
+  # 3. Public Subnet
+  publicSubnet:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${primaryVpc.id}
+      cidrBlock: ${publicSubnetCidr}
+      availabilityZone: ${primaryAz}
+      mapPublicIpOnLaunch: false # Defense-in-depth: do not auto-assign public IPs by default
+      tags:
+        Name: snet-public-usw2a
+        Tier: Public
+        Environment: Production
+
+  # 4. Public Route Table & Default Route to IGW
+  publicRouteTable:
+    type: aws:ec2:RouteTable
+    properties:
+      vpcId: ${primaryVpc.id}
+      routes:
+        - cidrBlock: 0.0.0.0/0
+          gatewayId: ${internetGateway.id}
+      tags:
+        Name: rtb-public-prod
+        Tier: Public
+
+  publicRouteTableAssoc:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${publicSubnet.id}
+      routeTableId: ${publicRouteTable.id}
+
+  # 5. Elastic IP for NAT Gateway
+  natEip:
+    type: aws:ec2:Eip
+    properties:
+      domain: vpc
+      tags:
+        Name: eip-nat-usw2a
+        Environment: Production
+
+  # 6. NAT Gateway for Private Subnet outbound access
+  natGateway:
+    type: aws:ec2:NatGateway
+    properties:
+      allocationId: ${natEip.id}
+      subnetId: ${publicSubnet.id}
+      connectivityType: public
+      tags:
+        Name: nat-gw-usw2a
+        Environment: Production
+    options:
+      dependsOn:
+        - ${internetGateway}
+
+  # 7. Private Subnet
+  privateSubnet:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${primaryVpc.id}
+      cidrBlock: ${privateSubnetCidr}
+      availabilityZone: ${primaryAz}
+      mapPublicIpOnLaunch: false
+      tags:
+        Name: snet-private-usw2a
+        Tier: Private
+        Environment: Production
+
+  # 8. Private Route Table & Default Route to NAT Gateway
+  privateRouteTable:
+    type: aws:ec2:RouteTable
+    properties:
+      vpcId: ${primaryVpc.id}
+      routes:
+        - cidrBlock: 0.0.0.0/0
+          natGatewayId: ${natGateway.id}
+      tags:
+        Name: rtb-private-prod
+        Tier: Private
+
+  privateRouteTableAssoc:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${privateSubnet.id}
+      routeTableId: ${privateRouteTable.id}
+
+  # 9. Baseline Application Security Group
+  appSecurityGroup:
+    type: aws:ec2:SecurityGroup
+    properties:
+      name: sg-app-workload-prod
+      description: Security group for internal application tier workloads
+      vpcId: ${primaryVpc.id}
+      ingress:
+        - description: Allow TLS from within VPC CIDR
+          fromPort: 443
+          toPort: 443
+          protocol: tcp
+          cidrBlocks:
+            - ${vpcCidr}
+      egress:
+        - description: Allow outbound HTTPS for updates and external APIs
+          fromPort: 443
+          toPort: 443
+          protocol: tcp
+          cidrBlocks:
+            - 0.0.0.0/0
+      tags:
+        Name: sg-app-workload-prod
+        Environment: Production
+
+outputs:
+  vpcId: ${primaryVpc.id}
+  vpcCidrBlock: ${primaryVpc.cidrBlock}
+  publicSubnetId: ${publicSubnet.id}
+  privateSubnetId: ${privateSubnet.id}
+  natGatewayId: ${natGateway.id}
+  appSecurityGroupId: ${appSecurityGroup.id}

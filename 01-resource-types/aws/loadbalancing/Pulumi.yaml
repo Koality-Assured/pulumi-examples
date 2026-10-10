@@ -1,0 +1,130 @@
+name: aws-loadbalancing
+description: Application Load Balancer (ALB) deployment with HTTPS listeners, HTTP-to-HTTPS redirect, target groups, and health checks
+runtime: yaml
+
+variables:
+  networkingStackName: sample-org/aws-networking-foundation/prod
+  computeStackName: sample-org/aws-compute-workload/prod
+  sslCertificateArn: arn:aws:acm:us-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000
+
+resources:
+  # Upstream StackReferences
+  networkStack:
+    type: pulumi:pulumi:StackReference
+    properties:
+      name: ${networkingStackName}
+
+  computeStack:
+    type: pulumi:pulumi:StackReference
+    properties:
+      name: ${computeStackName}
+
+  # Security Group for Public Application Load Balancer
+  albSecurityGroup:
+    type: aws:ec2:SecurityGroup
+    properties:
+      name: sg-alb-public-prod
+      description: Ingress security group for public HTTPS ALB
+      vpcId: ${networkStack.outputs["vpcId"]}
+      ingress:
+        - description: Public HTTP ingress (redirected to HTTPS)
+          fromPort: 80
+          toPort: 80
+          protocol: tcp
+          cidrBlocks:
+            - 0.0.0.0/0
+        - description: Public HTTPS ingress
+          fromPort: 443
+          toPort: 443
+          protocol: tcp
+          cidrBlocks:
+            - 0.0.0.0/0
+      egress:
+        - description: Forward to internal app security group
+          fromPort: 8080
+          toPort: 8080
+          protocol: tcp
+          securityGroups:
+            - ${networkStack.outputs["appSecurityGroupId"]}
+      tags:
+        Name: sg-alb-public-prod
+        Environment: Production
+
+  # Application Load Balancer (ALB)
+  appLoadBalancer:
+    type: aws:lb:LoadBalancer
+    properties:
+      name: alb-workload-prod
+      loadBalancerType: application
+      internal: false
+      securityGroups:
+        - ${albSecurityGroup.id}
+      subnets:
+        - ${networkStack.outputs["publicSubnetId"]}
+      dropInvalidHeaderFields: true
+      enableDeletionProtection: false
+      tags:
+        Name: alb-workload-prod
+        Environment: Production
+
+  # Target Group for Backend Microservices
+  appTargetGroup:
+    type: aws:lb:TargetGroup
+    properties:
+      name: tg-app-backend-prod
+      targetType: instance
+      port: 8080
+      protocol: HTTP
+      vpcId: ${networkStack.outputs["vpcId"]}
+      healthCheck:
+        path: /healthz
+        port: "8080"
+        protocol: HTTP
+        interval: 30
+        timeout: 5
+        healthyThreshold: 2
+        unhealthyThreshold: 3
+        matcher: "200"
+      tags:
+        Name: tg-app-backend-prod
+        Environment: Production
+
+  # Target Group Attachment for App Server
+  appTargetAttachment:
+    type: aws:lb:TargetGroupAttachment
+    properties:
+      targetGroupArn: ${appTargetGroup.arn}
+      targetId: ${computeStack.outputs["instanceId"]}
+      port: 8080
+
+  # HTTPS Listener (Port 443) forwarding to Target Group
+  httpsListener:
+    type: aws:lb:Listener
+    properties:
+      loadBalancerArn: ${appLoadBalancer.arn}
+      port: 443
+      protocol: HTTPS
+      sslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      certificateArn: ${sslCertificateArn}
+      defaultActions:
+        - type: forward
+          targetGroupArn: ${appTargetGroup.arn}
+
+  # HTTP Listener (Port 80) enforcing TLS redirect
+  httpRedirectListener:
+    type: aws:lb:Listener
+    properties:
+      loadBalancerArn: ${appLoadBalancer.arn}
+      port: 80
+      protocol: HTTP
+      defaultActions:
+        - type: redirect
+          redirect:
+            port: "443"
+            protocol: HTTPS
+            statusCode: HTTP_301
+
+outputs:
+  loadBalancerDnsName: ${appLoadBalancer.dnsName}
+  loadBalancerArn: ${appLoadBalancer.arn}
+  targetGroupArn: ${appTargetGroup.arn}

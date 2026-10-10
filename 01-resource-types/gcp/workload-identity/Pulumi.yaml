@@ -1,0 +1,59 @@
+name: gcp-workload-identity-federation
+description: Google Cloud Workload Identity Federation (WIF) enabling keyless GitHub Actions authentication via OIDC
+runtime: yaml
+
+variables:
+  projectId: sample-gcp-project
+  poolId: github-actions-pool
+  providerId: github-provider
+  githubOrg: koality-assured
+
+resources:
+  # 1. Workload Identity Pool
+  identityPool:
+    type: gcp:iam:WorkloadIdentityPool
+    properties:
+      project: ${projectId}
+      workloadIdentityPoolId: ${poolId}
+      displayName: GitHub Actions Identity Pool
+      description: Identity pool for authenticating GitHub Actions workflows
+      disabled: false
+
+  # 2. OIDC Provider configuration for GitHub
+  identityProvider:
+    type: gcp:iam:WorkloadIdentityPoolProvider
+    properties:
+      project: ${projectId}
+      workloadIdentityPoolId: ${identityPool.workloadIdentityPoolId}
+      workloadIdentityPoolProviderId: ${providerId}
+      displayName: GitHub OIDC Provider
+      description: OIDC identity provider matching GitHub token issuer
+      issuerUri: https://token.actions.githubusercontent.com
+      attributeMapping:
+        google.subject: assertion.sub
+        attribute.actor: assertion.actor
+        attribute.repository: assertion.repository
+        attribute.repository_owner: assertion.repository_owner
+      attributeCondition: assertion.repository_owner == '${githubOrg}'
+
+  # 3. Dedicated Service Account for CI/CD Deployment
+  deployerServiceAccount:
+    type: gcp:serviceaccount:Account
+    properties:
+      project: ${projectId}
+      accountId: sa-github-deployer
+      displayName: GitHub Actions Deployer Service Account
+      description: Service account assumed by GitHub Actions workflows via WIF
+
+  # 4. Bind GitHub Repository to Service Account Token Creator Role
+  wifIamBinding:
+    type: gcp:serviceaccount:IAMMember
+    properties:
+      serviceAccountId: ${deployerServiceAccount.name}
+      role: roles/iam.workloadIdentityUser
+      member: principalSet://iam.googleapis.com/${identityPool.name}/attribute.repository_owner/${githubOrg}
+
+outputs:
+  poolName: ${identityPool.name}
+  providerName: ${identityProvider.name}
+  serviceAccountEmail: ${deployerServiceAccount.email}

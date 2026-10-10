@@ -1,0 +1,113 @@
+name: aws-compute-workload
+description: Secure EC2 instance workload with AMI lookup, KMS-encrypted EBS volumes, IMDSv2 enforcement, and StackReference integration
+runtime: yaml
+
+variables:
+  # Reference to upstream networking stack
+  networkingStackName: sample-org/aws-networking-foundation/prod
+  instanceType: t3.medium
+  keyPairName: ops-admin-key
+
+  # Dynamic AMI query for the latest Ubuntu 22.04 LTS HVM AMI from Canonical
+  ubuntuAmi:
+    fn::invoke:
+      function: aws:ec2:getAmi
+      arguments:
+        mostRecent: true
+        filters:
+          - name: name
+            values:
+              - ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*
+          - name: virtualization-type
+            values:
+              - hvm
+        owners:
+          - "099720109477" # Canonical official owner ID
+
+resources:
+  # Upstream StackReference to fetch VPC, Subnet, and Security Group IDs
+  networkStack:
+    type: pulumi:pulumi:StackReference
+    properties:
+      name: ${networkingStackName}
+
+  # Customer Managed Key (CMK) for EBS storage volume encryption
+  ebsKmsKey:
+    type: aws:kms:Key
+    properties:
+      description: CMK for encrypting application EBS storage volumes
+      enableKeyRotation: true
+      keyUsage: ENCRYPT_DECRYPT
+      tags:
+        Name: kms-ebs-app-prod
+        Environment: Production
+
+  # IAM Role and Instance Profile for SSM Managed Workloads (No SSH ingress needed)
+  ec2SsmRole:
+    type: aws:iam:Role
+    properties:
+      name: role-ec2-ssm-workload-prod
+      assumeRolePolicy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              }
+            }
+          ]
+        }
+      tags:
+        Environment: Production
+
+  ssmPolicyAttachment:
+    type: aws:iam:RolePolicyAttachment
+    properties:
+      role: ${ec2SsmRole.name}
+      policyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  instanceProfile:
+    type: aws:iam:InstanceProfile
+    properties:
+      name: profile-ec2-ssm-workload-prod
+      role: ${ec2SsmRole.name}
+
+  # Hardened EC2 Compute Instance
+  appServer:
+    type: aws:ec2:Instance
+    properties:
+      ami: ${ubuntuAmi.id}
+      instanceType: ${instanceType}
+      keyName: ${keyPairName}
+      subnetId: ${networkStack.outputs["privateSubnetId"]}
+      vpcSecurityGroupIds:
+        - ${networkStack.outputs["appSecurityGroupId"]}
+      iamInstanceProfile: ${instanceProfile.name}
+      associatePublicIpAddress: false
+      ebsOptimized: true
+      # Root volume encryption using our CMK
+      rootBlockDevice:
+        volumeType: gp3
+        volumeSize: 50
+        encrypted: true
+        kmsKeyId: ${ebsKmsKey.arn}
+        deleteOnTermination: true
+      # Enforce IMDSv2 to defend against SSRF credential theft
+      metadataOptions:
+        httpEndpoint: enabled
+        httpTokens: required
+        httpPutResponseHopLimit: 1
+        instanceMetadataTags: enabled
+      tags:
+        Name: ec2-app-worker-01
+        Environment: Production
+        PatchGroup: tier-critical
+
+outputs:
+  instanceId: ${appServer.id}
+  instancePrivateIp: ${appServer.privateIp}
+  amiUsed: ${ubuntuAmi.id}
+  kmsKeyArn: ${ebsKmsKey.arn}

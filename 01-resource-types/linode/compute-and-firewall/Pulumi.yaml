@@ -1,0 +1,70 @@
+name: linode-compute-firewall
+description: Linode compute instance with private networking, strict cloud firewall, and scoped API tokens
+runtime: yaml
+
+variables:
+  region: us-west
+  instanceType: g6-standard-2
+  trustedAdminCidr: 198.51.100.0/24 # RFC 5737 documentation prefix
+
+resources:
+  # 1. Scoped Read-Only Token for Telemetry & Monitoring Services
+  monitoringServiceToken:
+    type: linode:Token
+    properties:
+      label: token-telemetry-collector
+      scopes: "account:read_only events:read_only firewall:read_only ips:read_only linodes:read_only"
+      expiry: null
+
+  # 2. Linode Virtual Machine Instance
+  workloadNode:
+    type: linode:Instance
+    properties:
+      label: linode-app-worker-01
+      region: ${region}
+      type: ${instanceType}
+      image: linode/ubuntu22.04
+      privateIp: true
+      tags:
+        - production
+        - workload
+        - hardened
+
+  # 3. Linode Cloud Firewall
+  appFirewall:
+    type: linode:Firewall
+    properties:
+      label: fw-app-worker-prod
+      inboundPolicy: DROP
+      outboundPolicy: ACCEPT
+      linodes:
+        - ${workloadNode.id}
+      inbounds:
+        - label: allow-http
+          action: ACCEPT
+          protocol: TCP
+          ports: "80"
+          ipv4s:
+            - 0.0.0.0/0
+          ipv6s:
+            - ::/0
+        - label: allow-https
+          action: ACCEPT
+          protocol: TCP
+          ports: "443"
+          ipv4s:
+            - 0.0.0.0/0
+          ipv6s:
+            - ::/0
+        - label: allow-admin-ssh
+          action: ACCEPT
+          protocol: TCP
+          ports: "22"
+          ipv4s:
+            - ${trustedAdminCidr}
+
+outputs:
+  instanceId: ${workloadNode.id}
+  instanceIpv4: ${workloadNode.ipAddress}
+  instancePrivateIp: ${workloadNode.privateIpAddress}
+  firewallId: ${appFirewall.id}

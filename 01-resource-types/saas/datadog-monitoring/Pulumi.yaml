@@ -1,0 +1,6 @@
+name: saas-datadog-monitoring
+description: Observability as Code using the Pulumi Datadog provider in Python
+runtime:
+  name: python
+  options:
+    virtualenv: venv

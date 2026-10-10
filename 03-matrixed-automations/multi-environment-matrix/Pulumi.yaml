@@ -1,0 +1,6 @@
+name: pattern-multi-environment-matrix
+description: Programmatic multi-environment and multi-region infrastructure matrix expansion in Pulumi Python
+runtime:
+  name: python
+  options:
+    virtualenv: venv

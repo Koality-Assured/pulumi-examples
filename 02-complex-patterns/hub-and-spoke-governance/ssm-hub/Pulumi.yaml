@@ -1,0 +1,158 @@
+name: pattern-ssm-governance-hub
+description: Multi-account Systems Manager (SSM) governance hub with automated patch baselines, hardened Session Manager preferences, and inventory sync
+runtime: yaml
+
+variables:
+  centralAccountId: "123456789012"
+  syncBucketName: ssm-inventory-sync-hub-123456789012
+
+resources:
+  # 1. Customer Managed Key (CMK) for Session Manager Encryption
+  ssmKmsKey:
+    type: aws:kms:Key
+    properties:
+      description: CMK for encrypting Session Manager interactive terminal sessions
+      enableKeyRotation: true
+      keyUsage: ENCRYPT_DECRYPT
+      tags:
+        Service: CentralSSM
+        Environment: Governance
+
+  # 2. CloudWatch Log Group for Streaming Session Terminal Logs
+  sessionLogGroup:
+    type: aws:cloudwatch:LogGroup
+    properties:
+      name: /aws/ssm/central-session-logs
+      retentionInDays: 365
+      kmsKeyId: ${ssmKmsKey.arn}
+
+  # 3. Magic Document: SSM-SessionManagerRunShell (Account-wide session overrides)
+  sessionPreferencesDocument:
+    type: aws:ssm:Document
+    properties:
+      name: SSM-SessionManagerRunShell
+      documentType: Session
+      documentFormat: JSON
+      content: |
+        {
+          "schemaVersion": "1.0",
+          "description": "Centralized hardened Session Manager preferences",
+          "sessionType": "Standard_Stream",
+          "inputs": {
+            "kmsKeyId": "${ssmKmsKey.id}",
+            "runAsEnabled": false,
+            "idleSessionTimeout": "20",
+            "maxSessionDuration": "60",
+            "cloudWatchLogGroupName": "${sessionLogGroup.name}",
+            "cloudWatchEncryptionEnabled": true,
+            "cloudWatchStreamingEnabled": true
+          }
+        }
+
+  # 4. Patch Baseline: Tier-Critical for Ubuntu (Auto-approve security patches after 3 days)
+  ubuntuCriticalBaseline:
+    type: aws:ssm:PatchBaseline
+    properties:
+      name: pb-ubuntu-tier-critical
+      operatingSystem: UBUNTU
+      description: Auto-approves Ubuntu Security and Critical updates after 3 days
+      approvedPatchesComplianceLevel: CRITICAL
+      approvalRules:
+        - approveAfterDays: 3
+          complianceLevel: CRITICAL
+          patchFilters:
+            - key: PRIORITY
+              values:
+                - Required
+                - Important
+
+  ubuntuCriticalPatchGroup:
+    type: aws:ssm:PatchGroup
+    properties:
+      baselineId: ${ubuntuCriticalBaseline.id}
+      patchGroup: tier-critical
+
+  # 5. Patch Baseline: Tier-Standard for Amazon Linux 2023 (Auto-approve after 7 days)
+  al2023StandardBaseline:
+    type: aws:ssm:PatchBaseline
+    properties:
+      name: pb-al2023-tier-standard
+      operatingSystem: AMAZON_LINUX_2023
+      description: Standard patch baseline for Amazon Linux 2023 fleets
+      approvedPatchesComplianceLevel: HIGH
+      approvalRules:
+        - approveAfterDays: 7
+          complianceLevel: HIGH
+          patchFilters:
+            - key: CLASSIFICATION
+              values:
+                - Security
+                - Bugfix
+            - key: SEVERITY
+              values:
+                - Critical
+                - Important
+
+  al2023StandardPatchGroup:
+    type: aws:ssm:PatchGroup
+    properties:
+      baselineId: ${al2023StandardBaseline.id}
+      patchGroup: tier-standard
+
+  # 6. Central S3 Bucket for Fleet-wide Inventory Resource Data Sync
+  syncBucket:
+    type: aws:s3:BucketV2
+    properties:
+      bucket: ${syncBucketName}
+
+  syncBucketPolicy:
+    type: aws:s3:BucketPolicy
+    properties:
+      bucket: ${syncBucket.id}
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "SSMBucketPermissionsCheck",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ssm.amazonaws.com"
+              },
+              "Action": "s3:GetBucketAcl",
+              "Resource": "${syncBucket.arn}"
+            },
+            {
+              "Sid": "SSMBucketDelivery",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ssm.amazonaws.com"
+              },
+              "Action": "s3:PutObject",
+              "Resource": "${syncBucket.arn}/*",
+              "Condition": {
+                "StringEquals": {
+                  "s3:x-amz-acl": "bucket-owner-full-control"
+                }
+              }
+            }
+          ]
+        }
+
+  # 7. Systems Manager Resource Data Sync
+  resourceDataSync:
+    type: aws:ssm:ResourceDataSync
+    properties:
+      name: rds-central-inventory-sync
+      s3Destination:
+        bucketName: ${syncBucket.id}
+        region: us-west-2
+        syncFormat: JsonSerDe
+    options:
+      dependsOn:
+        - ${syncBucketPolicy}
+
+outputs:
+  kmsKeyArn: ${ssmKmsKey.arn}
+  sessionLogGroupName: ${sessionLogGroup.name}
+  syncBucketArn: ${syncBucket.arn}

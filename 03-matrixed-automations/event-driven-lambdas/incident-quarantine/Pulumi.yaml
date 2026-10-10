@@ -1,0 +1,120 @@
+name: pattern-incident-quarantine-automation
+description: Automated incident response and instance quarantine triggered by EventBridge security findings
+runtime: yaml
+
+resources:
+  # 1. Isolation Security Group (Zero Ingress, Zero Egress)
+  isolationSecurityGroup:
+    type: aws:ec2:SecurityGroup
+    properties:
+      name: sg-incident-isolation-quarantine
+      description: Isolation security group denying all inbound and outbound traffic
+      ingress: []
+      egress: []
+      tags:
+        Name: sg-quarantine-isolated
+        ManagedBy: AutomatedIncidentResponse
+
+  # 2. IAM Role for Quarantine Automation Lambda
+  quarantineLambdaRole:
+    type: aws:iam:Role
+    properties:
+      name: role-incident-quarantine-worker
+      assumeRolePolicy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ]
+        }
+
+  quarantinePolicy:
+    type: aws:iam:Policy
+    properties:
+      name: policy-incident-quarantine-execution
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:ModifyNetworkInterfaceAttribute",
+                "ec2:CreateSnapshot"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "arn:aws:logs:*:*:*"
+            }
+          ]
+        }
+
+  quarantinePolicyAttachment:
+    type: aws:iam:RolePolicyAttachment
+    properties:
+      role: ${quarantineLambdaRole.name}
+      policyArn: ${quarantinePolicy.arn}
+
+  # 3. Serverless Quarantine Lambda
+  quarantineLambda:
+    type: aws:lambda:Function
+    properties:
+      name: fn-incident-auto-quarantine
+      runtime: python3.11
+      role: ${quarantineLambdaRole.arn}
+      handler: handler.lambda_handler
+      code:
+        fn::fileArchive: ./
+      timeout: 60
+      environment:
+        variables:
+          ISOLATION_SG_ID: ${isolationSecurityGroup.id}
+
+  # 4. EventBridge Rule for High-Severity GuardDuty Findings
+  findingRule:
+    type: aws:cloudwatch:EventRule
+    properties:
+      name: rule-guardduty-high-severity-finding
+      description: Triggers incident response on high-severity compromise findings
+      eventPattern: |
+        {
+          "source": ["aws.guardduty"],
+          "detail-type": ["GuardDuty Finding"],
+          "detail": {
+            "severity": [7, 7.0, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9]
+          }
+        }
+
+  # 5. Target Binding & Invocation Permission
+  findingTarget:
+    type: aws:cloudwatch:EventTarget
+    properties:
+      rule: ${findingRule.name}
+      arn: ${quarantineLambda.arn}
+
+  lambdaPermission:
+    type: aws:lambda:Permission
+    properties:
+      action: lambda:InvokeFunction
+      function: ${quarantineLambda.name}
+      principal: events.amazonaws.com
+      sourceArn: ${findingRule.arn}
+
+outputs:
+  isolationSecurityGroupId: ${isolationSecurityGroup.id}
+  lambdaArn: ${quarantineLambda.arn}

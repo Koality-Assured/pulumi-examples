@@ -1,0 +1,6 @@
+name: pattern-pulumi-managing-pulumi
+description: Meta-infrastructure managing Pulumi Cloud teams, stack RBAC permissions, and ESC environments as code
+runtime:
+  name: python
+  options:
+    virtualenv: venv

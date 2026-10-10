@@ -1,0 +1,42 @@
+name: pattern-cross-stack-app
+description: Application micro-stack ingesting network outputs via Pulumi StackReference
+runtime: yaml
+
+variables:
+  # Upstream network stack coordinate: <org>/<project>/<stack>
+  networkStackRefName: sample-org/pattern-cross-stack-network/prod
+
+resources:
+  # StackReference importing upstream outputs
+  networkStack:
+    type: pulumi:pulumi:StackReference
+    properties:
+      name: ${networkStackRefName}
+
+  # Security Group leveraging upstream VPC ID and CIDR
+  appSecurityGroup:
+    type: aws:ec2:SecurityGroup
+    properties:
+      name: sg-app-tier-demo
+      description: Security group attached to upstream VPC
+      vpcId: ${networkStack.outputs["vpcId"]}
+      ingress:
+        - description: Inbound HTTPS from VPC CIDR
+          fromPort: 443
+          toPort: 443
+          protocol: tcp
+          cidrBlocks:
+            - ${networkStack.outputs["vpcCidr"]}
+      egress:
+        - description: Outbound all
+          fromPort: 0
+          toPort: 0
+          protocol: "-1"
+          cidrBlocks:
+            - 0.0.0.0/0
+      tags:
+        Name: sg-app-tier-demo
+
+outputs:
+  boundVpcId: ${networkStack.outputs["vpcId"]}
+  appSecurityGroupId: ${appSecurityGroup.id}

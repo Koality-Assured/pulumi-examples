@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Spoke Account Onboarding Template: Bootstraps cross-account execution roles,
+  instance profiles, and EventBridge forwarding to link spoke accounts into
+  the central Systems Manager governance platform.
+
+Parameters:
+  CentralAccountId:
+    Type: String
+    Default: "123456789012"
+    Description: AWS Account ID of the central governance hub account.
+  CentralOperatorRoleName:
+    Type: String
+    Default: role-central-ssm-operator
+    Description: Name of the central operator role permitted to assume spoke execution.
+  CentralEventBusArn:
+    Type: String
+    Default: "arn:aws:events:us-west-2:123456789012:event-bus/central-ssm-event-bus"
+    Description: ARN of the central EventBridge event bus receiving compliance events.
+
+Resources:
+  # 1. Cross-Account Execution Role (Assumed by Central Platform)
+  SpokeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: role-spoke-ssm-execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: "arn:aws:iam::${CentralAccountId}:role/${CentralOperatorRoleName}"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonSSMAutomationRole
+      Tags:
+        - Key: ManagedBy
+          Value: CentralSSMPlatform
+
+  # 2. Managed Instance IAM Role & Instance Profile for Spoke EC2 Fleet
+  ManagedInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: role-spoke-managed-instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  ManagedInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: profile-spoke-managed-instance
+      Roles:
+        - Ref: ManagedInstanceRole
+
+  # 3. EventBridge IAM Role for Cross-Account Event Delivery
+  EventForwarderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: role-spoke-event-forwarder
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: PutEventsToCentralBus
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "events:PutEvents"
+                Resource:
+                  Ref: CentralEventBusArn
+
+  # 4. EventBridge Rule Forwarding SSM State Changes to Central Bus
+  SsmComplianceEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: rule-forward-ssm-compliance-events
+      Description: Forwards Systems Manager patch and compliance changes to central bus
+      EventPattern:
+        source:
+          - "aws.ssm"
+        detail-type:
+          - "EC2 State-change Notification"
+          - "SSM Compliance State Change"
+          - "SSM Maintenance Window Execution State Change"
+      Targets:
+        - Id: CentralEventBusTarget
+          Arn:
+            Ref: CentralEventBusArn
+          RoleArn:
+            Fn::GetAtt:
+              - EventForwarderRole
+              - Arn
+
+Outputs:
+  SpokeExecutionRoleArn:
+    Description: ARN of the execution role assumed by the central platform
+    Value:
+      Fn::GetAtt:
+        - SpokeExecutionRole
+        - Arn
+  ManagedInstanceProfileArn:
+    Description: ARN of the instance profile for spoke EC2 instances
+    Value:
+      Fn::GetAtt:
+        - ManagedInstanceProfile
+        - Arn

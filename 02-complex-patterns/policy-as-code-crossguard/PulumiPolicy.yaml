@@ -1,0 +1,3 @@
+name: enterprise-security-guardrails
+runtime: nodejs
+description: Enterprise CrossGuard policy pack enforcing mandatory tagging, IMDSv2, S3 encryption, and AWSGuard standards

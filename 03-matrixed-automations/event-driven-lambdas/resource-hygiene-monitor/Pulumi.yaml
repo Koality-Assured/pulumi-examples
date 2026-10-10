@@ -1,0 +1,101 @@
+name: pattern-resource-hygiene-monitor
+description: Scheduled serverless cloud hygiene and waste detection engine powered by EventBridge and AWS Lambda
+runtime: yaml
+
+resources:
+  # 1. IAM Execution Role for Hygiene Scanner
+  hygieneLambdaRole:
+    type: aws:iam:Role
+    properties:
+      name: role-resource-hygiene-scanner
+      assumeRolePolicy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ]
+        }
+
+  hygienePolicy:
+    type: aws:iam:Policy
+    properties:
+      name: policy-resource-hygiene-inspection
+      policy: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:DescribeVolumes",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeSnapshots",
+                "ec2:CreateTags"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "arn:aws:logs:*:*:*"
+            }
+          ]
+        }
+
+  hygienePolicyAttachment:
+    type: aws:iam:RolePolicyAttachment
+    properties:
+      role: ${hygieneLambdaRole.name}
+      policyArn: ${hygienePolicy.arn}
+
+  # 2. Serverless Hygiene Scanner Function
+  hygieneLambda:
+    type: aws:lambda:Function
+    properties:
+      name: fn-resource-hygiene-scanner
+      runtime: python3.11
+      role: ${hygieneLambdaRole.arn}
+      handler: handler.lambda_handler
+      code:
+        fn::fileArchive: ./
+      timeout: 180
+      memorySize: 256
+      environment:
+        variables:
+          SLACK_WEBHOOK_URL: https://hooks.slack.example.com/services/T00/B00/X00
+
+  # 3. Scheduled EventBridge Cron Rule (Daily at 06:00 UTC)
+  scheduleRule:
+    type: aws:cloudwatch:EventRule
+    properties:
+      name: rule-scheduled-hygiene-sweep
+      description: Daily trigger for unattached resource and FinOps hygiene scan
+      scheduleExpression: "cron(0 6 * * ? *)"
+
+  scheduleTarget:
+    type: aws:cloudwatch:EventTarget
+    properties:
+      rule: ${scheduleRule.name}
+      arn: ${hygieneLambda.arn}
+
+  lambdaPermission:
+    type: aws:lambda:Permission
+    properties:
+      action: lambda:InvokeFunction
+      function: ${hygieneLambda.name}
+      principal: events.amazonaws.com
+      sourceArn: ${scheduleRule.arn}
+
+outputs:
+  cronSchedule: ${scheduleRule.scheduleExpression}
+  scannerLambdaArn: ${hygieneLambda.arn}
