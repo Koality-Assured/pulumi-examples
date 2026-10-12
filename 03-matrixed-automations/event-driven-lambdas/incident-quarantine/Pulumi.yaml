@@ -51,6 +51,7 @@ resources:
                 "ec2:ModifyNetworkInterfaceAttribute",
                 "ec2:CreateSnapshot"
               ],
+              # Illustrative wildcard: In production, consider scoping down via attribute-based access control (ABAC) tags if possible.
               "Resource": "*"
             },
             {

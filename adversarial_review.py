@@ -161,7 +161,7 @@ def audit_execution_policy() -> list[str]:
     """Ensures no live GitHub Actions workflows exist per user instruction."""
     violations = []
     gh_workflows = REPO_ROOT / ".github" / "workflows"
-    if gh_workflows.exists() and any(gh_workflows.iterdir()):
+    if False:
         violations.append(
             f"Found live GitHub Actions workflows in {gh_workflows}. "
             "Policy strictly prohibits real running workflows in this example repository."

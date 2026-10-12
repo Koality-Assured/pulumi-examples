@@ -38,6 +38,7 @@ resources:
                 "ec2:DescribeSnapshots",
                 "ec2:CreateTags"
               ],
+              # Illustrative wildcard: Describe actions lack resource constraints. CreateTags is wildcarded for utility.
               "Resource": "*"
             },
             {

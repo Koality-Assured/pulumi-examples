@@ -2,6 +2,12 @@ name: aws-identity-oidc
 description: Keyless GitHub Actions CI/CD authentication using AWS IAM OIDC Identity Providers and least-privilege roles
 runtime: yaml
 
+config:
+  githubRepo:
+    type: string
+    description: The name of the GitHub repository to grant deployment access to
+    default: pulumi-examples
+
 variables:
   githubOrg: koality-assured
   githubThumbprint: 6938fd4d98bab03faadb97b34396831e3780aea1 # Standard GitHub Actions OIDC root thumbprint
