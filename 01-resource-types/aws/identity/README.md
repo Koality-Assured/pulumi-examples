@@ -6,6 +6,6 @@ This example establishes keyless, credential-free authentication for CI/CD pipel
 Long-lived AWS access keys (`AKIA...`) stored in CI/CD secrets present significant security hazards (credential exfiltration, lack of rotation, privilege creep). OIDC federation exchanges short-lived JSON Web Tokens (JWTs) issued by GitHub Actions for ephemeral AWS STS credentials.
 
 ## Security Highlights
-- **Scoped Trust Boundary**: The `assumeRolePolicy` asserts both `aud == sts.amazonaws.com` and a restrictive `sub` claim matching only repositories within the designated organization (`repo:koality-assured/*:*`).
+- **Scoped Trust Boundary**: The `assumeRolePolicy` asserts both `aud == sts.amazonaws.com` and a restrictive `sub` claim matching only repositories within the designated organization (`repo:koality-assured/pulumi-examples:ref:refs/heads/main`).
 - **Bounded Session Duration**: Restricts role assumption duration to 3,600 seconds (1 hour) to limit the blast radius of temporary tokens.
 - **Granular Least Privilege**: Replaces permissive administrator access with explicit service permissions for state manipulation and inspection.
