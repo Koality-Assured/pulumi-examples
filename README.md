@@ -22,7 +22,7 @@
 Production-grade, generalized, secure Infrastructure as Code (IaC) architectural patterns and resource examples using [Pulumi](https://www.pulumi.com/).
 This repository serves as an authoritative reference for engineering teams deploying multi-cloud infrastructure (AWS, GCP, Linode), SaaS governance (GitHub, Datadog), cross-stack dependencies, multi-account Systems Manager (SSM) governance, compliance guardrails, and matrixed serverless automations.
 > [!NOTE]
-> **Advisory & Reference Only**: All examples are generalized and sanitized. No real GitHub Actions workflows execute against live cloud environments from this repository, and no live infrastructure is mutated. Use these architectures as blueprints for production stacks.
+> **Advisory & Reference Only**: All examples are generalized and sanitized. Workflows in this repository only run offline checks and do not execute against live cloud environments, and no live infrastructure is mutated. Use these architectures as blueprints for production stacks.
 
 ---
 
@@ -99,7 +99,7 @@ python adversarial_review.py
 The auditor executes four verification phases:
 1. **Forbidden Identifier Scan**: Scans all files against a forbidden term registry.
 2. **Syntax Verification**: Parses every YAML, Python, and JSON file using native parsers.
-3. **Execution Policy Enforcement**: Confirms no real running GitHub Actions workflows exist.
+3. **Execution Policy Enforcement**: Confirms workflows pass static checks and do not interact with live cloud environments.
 4. **Documentation Coverage**: Verifies every example directory maintains an informative README.
 ---
 ## License
