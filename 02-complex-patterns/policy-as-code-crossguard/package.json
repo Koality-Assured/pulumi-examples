@@ -11,6 +11,6 @@
     "@pulumi/aws": "^6.0.0",
     "@pulumi/awsguard": "^0.4.0",
     "@pulumi/policy": "^1.8.0",
-    "@pulumi/pulumi": "^3.0.0"
+    "@pulumi/pulumi": "^3.274.1"
   }
 }
